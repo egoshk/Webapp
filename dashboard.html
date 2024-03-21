@@ -80,14 +80,13 @@
     </div>
 
     <div class="container">
-        <h2>Welcome to your Dashboard</h2>
+        <h2>Hello {username}. Welcome to your Dashboard</h2>
 
         <section id="current-polls">
             <h3>Current Polls</h3>
             <!-- [Placeholder for current polls] -->
-            <button onclick="window.location.href='Vote.html'">Generate a voting token</button>
-            <button onclick="window.location.href='Vote.html'">Go to Vote</button>
-            <button onclick="window.location.href='Result.html'">Display Result</button>
+            <button onclick="window.location.href=window.location.origin + '/Vote.html'">Go to Vote</button>
+            <button onclick="window.location.href=window.location.origin + '/Result.html'">Display Result</button>
         </section>
 
         <section id="voting-history">
@@ -98,6 +97,7 @@
         <!-- Additional sections... -->
 
         <div class="logout-link">
+            <a href="index.html">Home</a>
             <a href="confirm_logout.html">Logout</a>
         </div>
     </div>

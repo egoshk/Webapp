@@ -7,6 +7,10 @@ from time import time
 import secrets
 import http.cookies
 
+# Define the port as varible
+HOST = "localhost"
+PORT = 8000
+
 class Block:
     def __init__(self, index, timestamp, vote):
         self.index = index
@@ -59,15 +63,27 @@ class CustomHandler(SimpleHTTPRequestHandler):
                 if 'session' in cookies:
                     username = cookies['session'].value
                     print(f"Currently logged in as: {username}")
+                
+                    # Read and personalize the dashboard HTML file
+                    with open('dashboard.html', 'r') as file:
+                        html_content = file.read()
+                        personalized_content = html_content.replace("{username}", username)
+
+                    # Send the personalized content as a response
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/html')
+                    self.end_headers()
+                    self.wfile.write(personalized_content.encode())
+                    return
+                                
                 else:
                     # Redirect to login if session cookie is missing
                     self.send_response(303)
                     self.send_header('Location', '/login')
                     self.end_headers()
-                    return SimpleHTTPRequestHandler.do_GET(self)
+                    return
 
             self.path = '/dashboard.html'
-            return SimpleHTTPRequestHandler.do_GET(self)
         elif self.path == '/Result.html':
             try:
                 with open('Result.html', 'r') as file:
@@ -82,20 +98,37 @@ class CustomHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(html_content.encode())
             except FileNotFoundError:
                 self.send_error(404, "File not found")
+        elif self.path == '/thankyou':
+            self.path = '/TyForVoting.html'
         elif self.path == '/logout_confirm':
             self.path = '/logout_confirm.html'
-            return SimpleHTTPRequestHandler.do_GET(self)
         elif self.path == '/confirm_logout':
             # Clear the session cookie
             self.send_response(303)
-            self.send_header('Location', '/home.html')
+            self.send_header('Location', '/index.html')
             self.send_header('Set-Cookie', 'session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT')
             self.end_headers()
-        elif self.path == '/blockchain':
+        elif self.path == '/Home.html':
+            username = ''
+            if 'Cookie' in self.headers:
+                cookies = http.cookies.SimpleCookie(self.headers['Cookie'])
+                if 'session' in cookies:
+                    username = cookies['session'].value
+
+            with open('Home.html', 'r') as file:
+                html_content = file.read()
+
+            if username:
+                user_section = f"<a class='u-button-style u-nav-link u-text-active-palette-1-base u-text-hover-palette-2-base' href='/logout' style='padding: 22px 24px;'>{username} | Logout</a>"
+            else:
+                user_section = "<a class='u-button-style u-nav-link u-text-active-palette-1-base u-text-hover-palette-2-base' href='Login.html' style='padding: 22px 24px;'>Login</a>"
+
+            html_content = html_content.replace("{user_section}", user_section)
+
             self.send_response(200)
-            self.send_header('Content-type', 'application/json')
+            self.send_header('Content-type', 'text/html')
             self.end_headers()
-            self.wfile.write(json.dumps([vars(block) for block in CustomHandler.blockchain]).encode())
+            self.wfile.write(html_content.encode())
 
         return super().do_GET()
 
@@ -117,14 +150,11 @@ class CustomHandler(SimpleHTTPRequestHandler):
             CustomHandler.users[username] = hashed_password
             self.save_user_to_database(username, hashed_password)
 
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
+            # Start session and redirect to dashboard
+            self.send_response(303)
+            self.send_header('Location', '/dashboard')
+            self.send_header('Set-Cookie', f'session={username}; Path=/')
             self.end_headers()
-            self.wfile.write(b"<html><head>")
-            self.wfile.write(b"<meta http-equiv='refresh' content='3; url=http://localhost:8000/Login.html' />")
-            self.wfile.write(b"</head><body>")
-            self.wfile.write(f"Thank you, {username}. Your submission has been received. Redirecting to the home page.".encode())
-            self.wfile.write(b"</body></html>")
 
         elif self.path == '/login':
             form = cgi.FieldStorage(
@@ -157,7 +187,26 @@ class CustomHandler(SimpleHTTPRequestHandler):
             self.send_header('Set-Cookie', 'session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT')
             self.end_headers()
 
+        elif self.path == '/home_logout':
+            self.send_response(303)
+            self.send_header('Location', '/index.html')
+            self.send_header('Set-Cookie', 'session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT')
+            self.end_headers()
+
+
         elif self.path == '/vote':
+        # Retrieve username from the session cookie
+            cookies = http.cookies.SimpleCookie(self.headers.get('Cookie'))
+            username = cookies['session'].value if 'session' in cookies else None
+
+            if username is None:
+                # Handle the case where there is no logged-in user
+                self.send_response(401)  # Unauthorized
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(b"Please log in to vote.")
+                return
+
             form = cgi.FieldStorage(
                 fp=self.rfile,
                 headers=self.headers,
@@ -165,54 +214,43 @@ class CustomHandler(SimpleHTTPRequestHandler):
                         'CONTENT_TYPE': self.headers['Content-Type'],
                         })
 
-            username = form.getvalue('username')
             vote = form.getvalue('vote')
 
-            # Check if the user already has a token
+            # Check if the user already has a token, generate one if not
             if username not in CustomHandler.user_tokens:
-                # Generate a unique token using secrets module
                 token = secrets.token_hex(16)
                 CustomHandler.user_tokens[username] = token
+                print(f"{username}'s token: {token}")
+                # Optionally send the token back to the user or log it
 
-                # Send the token back to the user
-                self.send_response(200)
-                self.send_header('Content-type', 'text/plain')
+            # Check if the user has already voted
+            if username in CustomHandler.user_votes:
+                self.send_response(400)
+                self.send_header('Content-type', 'text/html')
                 self.end_headers()
-                self.wfile.write(f"Your voting token: {token}".encode())
-                return
-
-            # Continue with the voting process
-            if vote in CustomHandler.votes:
-                # Debug prints
-                print(f"Username: {username}")
-                print(f"User Tokens: {CustomHandler.user_tokens}")
-                print(f"User Votes: {CustomHandler.user_votes}")
-
-                # Check if the user has already voted
-                if username in CustomHandler.user_votes:
-                    self.send_response(400)
-                    self.send_header('Content-type', 'text/html')
-                    self.end_headers()
-                    self.wfile.write(b"You have already voted.")
-                    return
-
-                # Continue with the voting process
+                self.wfile.write(b"You have already voted.")
+            else:
+                # Record the vote
                 new_block = Block(len(CustomHandler.blockchain), time(), vote)
                 if len(CustomHandler.blockchain) > 0:
                     new_block.previous_hash = CustomHandler.blockchain[-1].hash
                 CustomHandler.blockchain.append(new_block)
 
                 CustomHandler.votes[vote] += 1
-                CustomHandler.user_votes.add(username)  # Store the user's vote
+                CustomHandler.user_votes.add(username)
+
+                # After a successful vote
+                self.send_response(303)
+                self.send_header('Location', '/thankyou')  # Redirect to the thank you page
+                self.end_headers()
+
 
             print(f"Voting Results: {CustomHandler.votes}")
             print(f"Blockchain: {CustomHandler.blockchain}")
 
-            self.send_response(303)  # 303 See Other is commonly used for redirects after form submissions
-            self.send_header('Location', '/dashboard')  # Redirect to the dashboard page
-            self.end_headers()
+
 
 # Server setup
-httpd = HTTPServer(('localhost', 8000), CustomHandler)
-print("Serving at port 8000")
+httpd=HTTPServer((HOST, PORT), CustomHandler)
+print(f"Serving at port {PORT}")
 httpd.serve_forever()
